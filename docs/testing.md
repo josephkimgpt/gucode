@@ -44,3 +44,24 @@ Native reports are under `docs/research/deepseek/`. The final public gucOS
 include the successful interactive DeepSeek write and exit, exact payload
 verification, prior failures and scheduler exit status. The public terminal run
 did not emit ANSI color. Only DeepSeek was used for live provider acceptance.
+
+## Interactive input (0.1.2)
+
+`tests/input.py` drives an actual native PTY against an offline DeepSeek-shaped
+fixture. It checks exact submitted text for cursor movement, Home/End, forward
+and backward deletion, kill/yank, word erase, history draft preservation, Unicode,
+horizontal scrolling and resize. It covers bracketed paste, malformed UTF-8 before
+a paste terminator, and cancellation of an unfinished paste. Exit, EOF, Ctrl-C
+and SIGTERM restore terminal attributes; Darwin's kernel-managed PENDIN bit is
+excluded from comparison. The PTY is drained while the process runs so terminal
+output backpressure is not mistaken for an editor failure.
+
+The editor supports Ctrl-A/E/B/F, Ctrl-P/N or Up/Down, Ctrl-U/K/W/Y, Ctrl-D,
+Ctrl-L, Home/End/Delete/Backspace and Alt-B/F. History stays in process memory,
+with at most 32 entries of up to 8 KiB each. Prompt input retains the 8 MiB bound;
+an overflow rejects that submission. Bracketed pasted newlines become spaces;
+Ctrl-C can cancel incomplete paste. Input is edited on one horizontally scrolling
+line. UTF-8 codepoint editing is supported; combining grapheme clusters are not
+claimed as indivisible editing units. Ctrl-C exits the application as before.
+Terminal settings are restored before any tool/HTTP execution or confirmation
+transition. Pipe input retains its plain line-reading behavior.

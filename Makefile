@@ -2,7 +2,7 @@ CC = cc
 CFLAGS = -O2 -std=c11 -Wall -Wextra -Wpedantic
 CPPFLAGS = -Isrc -Ivendor/cjson
 LDLIBS = -lcurl
-SOURCES = src/main.c src/common.c src/http.c src/tools.c vendor/cjson/cJSON.c
+SOURCES = src/main.c src/common.c src/http.c src/tools.c src/input.c vendor/cjson/cJSON.c
 PREFIX = /usr/local
 
 all: build/gucode
@@ -22,9 +22,11 @@ build/gucode-sanitize: $(SOURCES) src/gucode.h
 check: build/gucode
 	python3 tests/regression.py
 	python3 tests/resources.py
+	python3 tests/input.py
 sanitize: build/gucode-sanitize
 	GUCODE_BINARY=$(CURDIR)/build/gucode-sanitize python3 tests/regression.py
 	GUCODE_BINARY=$(CURDIR)/build/gucode-sanitize python3 tests/resources.py
+	GUCODE_BINARY=$(CURDIR)/build/gucode-sanitize python3 tests/input.py
 check-leaks: build/gucode
 	GUCODE_LEAK_CHECK=1 python3 tests/resources.py
 .PHONY: check sanitize check-leaks

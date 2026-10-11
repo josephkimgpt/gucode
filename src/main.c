@@ -1,6 +1,7 @@
 #include "gucode.h"
 #include <curl/curl.h>
 #include <errno.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -193,6 +194,7 @@ static int task(cJSON *messages, const char *prompt, const char *endpoint,
   return interrupted ? 130 : 1;
 }
 int main(int argc, char **argv) {
+  setlocale(LC_CTYPE, "");
   atexit(clear_protected_files);
   cJSON_Hooks hooks = {gc_alloc, free};
   cJSON_InitHooks(&hooks);
@@ -360,28 +362,20 @@ int main(int argc, char **argv) {
     printf("gucode %s · %s\nType /help for commands.\n", GUCODE_VERSION, model);
     char *line = NULL;
     while (!interrupted) {
-      fputs("\ngucode> ", stdout);
-      fflush(stdout);
-      Buffer input = {0};
-      int ch, oversized = 0;
-      while ((ch = fgetc(stdin)) != EOF && ch != '\n' && !interrupted) {
-        char c = (char)ch;
-        if (input.len < GC_LIMIT)
-          buf_add(&input, &c, 1);
-        else
-          oversized = 1;
-      }
-      if (oversized) {
-        buf_free(&input);
+      fputc('\n', stdout);
+      free(line);
+      line = NULL;
+      int status = input_line("gucode> ", &line, 1);
+      if (status == -2) {
         fputs("gucode: input exceeds 8 MiB; prompt discarded\n", stderr);
         rc = 1;
         continue;
       }
-      free(line);
-      line = input.data ? input.data : gc_copy("");
-      long n = (long)input.len;
-      if (ch == EOF && !n)
+      if (status <= 0) {
+        if (status < 0) { perror("gucode: input"); rc = 1; }
         break;
+      }
+      long n = (long)strlen(line);
       while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
         line[--n] = 0;
       if (!n)
@@ -410,5 +404,5 @@ int main(int argc, char **argv) {
   memset(key, 0, strlen(key));
   free(key);
   curl_global_cleanup();
-  return interrupted ? 130 : rc;
+  return input_failed ? 1 : interrupted ? 130 : rc;
 }

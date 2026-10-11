@@ -5,7 +5,7 @@
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
-#define GUCODE_VERSION "0.1.1"
+#define GUCODE_VERSION "0.1.2"
 #define GC_LIMIT (8u * 1024u * 1024u)
 /* Leave room for the request envelope and tool schemas. Serialized byte limits,
  * not a total process-memory or provider-token limit. */
@@ -16,6 +16,7 @@ typedef struct {
 } Buffer;
 extern volatile sig_atomic_t interrupted;
 extern int use_color;
+extern int input_failed;
 void *gc_alloc(size_t n);
 char *gc_copy(const char *s);
 char *utf8_clean(const char *text);
@@ -23,6 +24,8 @@ int json_clean_strings(cJSON *j);
 void buf_add(Buffer *b, const char *s, size_t n);
 void buf_text(Buffer *b, const char *s);
 void buf_free(Buffer *b);
+/* 1: line, 0: EOF/interruption, -1: I/O error, -2: oversized input. */
+int input_line(const char *prompt, char **line, int history);
 char *read_file(const char *path, size_t limit);
 int atomic_write(const char *path, const char *text, size_t n,
                  int private_file);

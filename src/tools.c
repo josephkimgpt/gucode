@@ -86,11 +86,17 @@ static int approve(const char *name, const char *arguments, int yes) {
           stderr);
     return 0;
   }
-  fputs("Allow this action? [y/N] ", stdout);
-  fflush(stdout);
-  char line[32];
-  return fgets(line, sizeof line, stdin) && !interrupted &&
-         (line[0] == 'y' || line[0] == 'Y');
+  char *line = NULL;
+  int status = input_line("Allow this action? [y/N] ", &line, 0);
+  if (status < 0) {
+    if (status == -1) perror("gucode: approval input");
+    else fputs("gucode: approval input exceeds limit\n", stderr);
+    input_failed = 1; interrupted = 1;
+  }
+  int allowed = status == 1 && !interrupted &&
+                (!strcmp(line, "y") || !strcmp(line, "Y"));
+  free(line);
+  return allowed;
 }
 static char *path_in_workspace(const char *path, int create) {
   if (!path || !*path) {
