@@ -1,0 +1,15 @@
+{
+  "sourceCommit": "735423130bb65f1773c46446d9a8f7dc4bd0f0e7",
+  "sourceHashes": {
+    "src/common.c": "8eece7be295e0f81803f74d26384c9986c52464e821ff65220d5ef21389c0916",
+    "src/gucode.h": "3a1da77b334aa4e5890ccdaf1d09a121173570a8f92be08504ae7c01e0f2ddb3",
+    "src/http.c": "d2a379c32d65658fd7853ce520f6f8ddaaae6548d40329a169bd5bdf4e7ec574",
+    "src/main.c": "7eab50ea25df8e517647c3a1687f2150551dc233d0dcc255361a6c6c26302da8",
+    "src/tools.c": "2c36709b31292580931176f867236ebb0751af8d66f92947d210754d05ce9f2f"
+  },
+  "nativeBuild": "Apple clang, system libcurl",
+  "regressionGroups": 22,
+  "addressSanitizer": true,
+  "undefinedBehaviorSanitizer": true,
+  "scope": "Deterministic suite passed on release sources; live DeepSeek bugfix/resume and statistics implementation passed. Vendor cJSON emits six deprecation warnings in sanitizer build; no sanitizer diagnostics observed."
+}
