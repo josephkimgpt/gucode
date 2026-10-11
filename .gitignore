@@ -1,0 +1,6 @@
+build/
+.gucode/
+.env
+.env.*
+*.key
+.DS_Store

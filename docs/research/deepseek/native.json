@@ -1,0 +1,19 @@
+{
+  "provider": "DeepSeek",
+  "model": "deepseek-flash",
+  "native": true,
+  "bugfix": true,
+  "independent_result": "12",
+  "regression_test": true,
+  "session_resume": true,
+  "tool_calls": [
+    "list_files",
+    "read_file",
+    "edit_file",
+    "shell",
+    "write_file",
+    "shell"
+  ],
+  "duration_seconds": 9.07,
+  "time": "2026-10-11T07:23:07Z"
+}
