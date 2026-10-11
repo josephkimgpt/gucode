@@ -22,3 +22,11 @@ output bounds, and removal of the API-key environment variable from child tools.
 The gucOS package repository owns browser build, source install, retained archive
 relinking, binary install, reload and live API acceptance. It takes an explicit
 core distribution and runtime identity; no core build reads the packages checkout.
+
+## 0.1.0 release evidence
+
+Native reports are under `docs/research/deepseek/`. The final public gucOS
+[acceptance reports](https://github.com/GroundUpCoder/gucos-packages/tree/a690713/docs/research/gucode)
+include the successful interactive DeepSeek write and exit, exact payload
+verification, prior failures and scheduler exit status. The public terminal run
+did not emit ANSI color. Only DeepSeek was used for live provider acceptance.
