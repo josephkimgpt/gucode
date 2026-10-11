@@ -67,6 +67,7 @@ s.task(b'one two\x1bbX\x1bf!','one Xtwo!')
 s.task(b'a'*120+b'\x01X\x05Y','X'+'a'*120+'Y')
 fcntl.ioctl(s.slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,20,0,0))
 s.task(b'abc\x0c\x01X','Xabc')
+fcntl.ioctl(s.slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
 # Approval uses the same editor and exact affirmative matching.
 for typed,allowed in [(b'wrong\x15y',True),(b'yess',False)]:
     os.write(s.master,b'approval\r');s.until(b'Allow this action? [y/N] ')
