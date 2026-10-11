@@ -16,13 +16,14 @@ static void help(void) {
       "Usage: gucode [options] [prompt]\n"
       "  -p, --prompt TEXT        Run one task, then exit\n"
       "  -C DIRECTORY            Working directory for files and commands\n"
-      "  --yes                   Allow edits and shell commands without "
+      "  --yes, --yolo           Allow edits and shell commands without "
       "prompting\n"
       "  --session FILE          Save/resume conversation (private JSON file)\n"
       "  --model NAME            Default: DEEPSEEK_MODEL or deepseek-flash\n"
       "  --endpoint URL          Default: "
       "https://api.deepseek.com/chat/completions\n"
-      "  --key-file FILE         Read API key from file (or DEEPSEEK_API_KEY)\n"
+      "  --key-file FILE         Fallback key file (then DEEPSEEK_API_KEY)\n"
+      "  Default key: ~/.guc/creds/deepseek-api-key (checked first)\n"
       "  --max-turns N           Maximum API requests per task (default 24)\n"
       "  --command-timeout N     Shell command deadline in seconds (default "
       "120)\n"
@@ -157,7 +158,7 @@ int main(int argc, char **argv) {
       puts("gucode " GUCODE_VERSION);
       return 0;
     }
-    if (!strcmp(a, "--yes")) {
+    if (!strcmp(a, "--yes") || !strcmp(a, "--yolo")) {
       yes = 1;
       continue;
     }
@@ -212,13 +213,31 @@ int main(int argc, char **argv) {
     return 2;
   }
   char *key = NULL;
+  Buffer default_keyfile = {0};
+  const char *home = getenv("HOME");
   const char *env = getenv("DEEPSEEK_API_KEY");
-  if (keyfile)
-    key = read_file(keyfile, 4096);
-  else if (env && *env)
-    key = gc_copy(env);
+  if (home && *home) {
+    buf_text(&default_keyfile, home);
+    buf_text(&default_keyfile, "/.guc/creds/deepseek-api-key");
+    key = read_file(default_keyfile.data, 4096);
+    if (key)
+      keyfile = default_keyfile.data;
+    else if (errno != ENOENT) {
+      fputs("gucode: cannot read default API key file\n", stderr);
+      buf_free(&default_keyfile);
+      return 2;
+    }
+  }
   if (!key) {
-    fputs("gucode: set DEEPSEEK_API_KEY or --key-file\n", stderr);
+    if (keyfile)
+      key = read_file(keyfile, 4096);
+    else if (env && *env)
+      key = gc_copy(env);
+  }
+  if (!key) {
+    fputs("gucode: create ~/.guc/creds/deepseek-api-key, use --key-file, "
+          "or set DEEPSEEK_API_KEY\n", stderr);
+    buf_free(&default_keyfile);
     return 2;
   }
   size_t kn = strlen(key);
@@ -227,9 +246,11 @@ int main(int argc, char **argv) {
   if (!kn || strchr(key, '\n') || strchr(key, '\r')) {
     fputs("gucode: invalid API key\n", stderr);
     free(key);
+    buf_free(&default_keyfile);
     return 2;
   }
   protect_file(keyfile);
+  buf_free(&default_keyfile);
   unsetenv(
       "DEEPSEEK_API_KEY"); /* Do not pass this credential to shell tools. */
   if (directory && chdir(directory)) {

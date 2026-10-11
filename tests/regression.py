@@ -13,6 +13,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
   body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
   mode=self.path[1:]
   self.server.last_request=body
+  self.server.last_authorization=self.headers.get("Authorization")
   self.send_response(429 if mode=='rate' else 200);self.send_header('Content-Type','text/event-stream');self.end_headers()
   if mode=='rate':self.wfile.write(b'{"error":{"message":"rate limited"}}');return
   if mode=='escape_error':self.wfile.write(b'data: {"error":{"message":"\\u001b[2Jowned"}}\n\n');return
@@ -57,7 +58,7 @@ server=Server(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.ser
 passed=[]
 try:
  with tempfile.TemporaryDirectory(prefix='gucode-regression-') as td:
-  parent=pathlib.Path(td);(parent/'outside.txt').write_text('outside-secret');p=parent/'workspace';p.mkdir()
+  parent=pathlib.Path(td);os.environ['HOME']=str(parent/'home');(parent/'home').mkdir();(parent/'outside.txt').write_text('outside-secret');p=parent/'workspace';p.mkdir()
   for mode in ['edit','duplicate','deny','outside','timeout','output','env','broken','missing_done','after_done','trailing_json','nul','key','session','flood','raw_nul','escape_error','agents_symlink','agents_hardlink','rate']:
    (p/'a.txt').write_text('old old' if mode=='duplicate' else 'old');server.last_tool=None
    args=[binary,'--endpoint',f'http://127.0.0.1:{server.server_port}/{mode}','--no-color','--command-timeout','1','-p','test']
@@ -88,6 +89,38 @@ try:
     (p/'AGENTS.md').unlink()
    if mode=='escape_error':assert '\x1b' not in r.stderr and '^[' in r.stderr
    passed.append(mode)
+  default=parent/'home/.guc/creds/deepseek-api-key';default.parent.mkdir(parents=True)
+  explicit=parent/'explicit-key';explicit.write_text('explicit-test')
+  def credential_case(expected, extra=(), home=str(parent/'home'), envkey='env-test'):
+   env={**os.environ,'HOME':home,'DEEPSEEK_API_KEY':envkey}
+   server.last_authorization=None
+   r=subprocess.run([binary,'--yes','--endpoint',f'http://127.0.0.1:{server.server_port}/env','-C',str(p),'-p','test',*extra],env=env,capture_output=True,text=True,timeout=10)
+   assert r.returncode==0,(r.stdout,r.stderr)
+   assert server.last_authorization=='Bearer '+expected
+   assert server.last_tool['output']=='key-not-inherited'
+  default.write_text('default-test\r\n')
+  credential_case('default-test',['--key-file',str(explicit)])
+  credential_case('default-test',envkey='')
+  (p/'key-alias').unlink();os.link(default,p/'key-alias')
+  r=subprocess.run([binary,'--yes','--endpoint',f'http://127.0.0.1:{server.server_port}/key','-C',str(p),'-p','test'],env={**os.environ,'DEEPSEEK_API_KEY':'env-test'},capture_output=True,text=True,timeout=10)
+  assert r.returncode==0 and not server.last_tool['ok']
+  for invalid in ['', 'bad\nkey', 'bad\x00key', 'x'*4097]:
+   default.write_text(invalid);server.last_authorization=None
+   r=subprocess.run([binary,'--key-file',str(explicit),'-p','test'],env={**os.environ,'DEEPSEEK_API_KEY':'env-test'},capture_output=True,text=True,timeout=10)
+   assert r.returncode==2 and server.last_authorization is None
+  default.unlink()
+  credential_case('explicit-test',['--key-file',str(explicit)])
+  credential_case('env-test')
+  credential_case('env-test',home='')
+  passed.append('default-key-precedence-fallback-validation-protection')
+ with tempfile.TemporaryDirectory(prefix='gucode-yolo-') as td:
+  for mode in ['edit','env']:
+   p=pathlib.Path(td);(p/'a.txt').write_text('old');server.last_tool=None
+   r=subprocess.run([binary,'--yolo','--endpoint',f'http://127.0.0.1:{server.server_port}/{mode}','-p','test'],cwd=p,env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},input='',capture_output=True,text=True,timeout=10)
+   assert r.returncode==0 and server.last_tool['ok'],(r.stdout,r.stderr)
+   assert 'Allow this action?' not in r.stdout
+   if mode=='edit':assert (p/'a.txt').read_text()=='new'
+  passed.append('yolo-edits-and-shell-without-prompts')
  for endpoint in ['http://localhost:80@attacker.example/','http://127.0.0.1:123bad/path','http://localhost:999999/','file:///tmp/key']:
    r=subprocess.run([binary,'--endpoint',endpoint,'-p','x'],env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},capture_output=True,timeout=5)
    assert r.returncode==2

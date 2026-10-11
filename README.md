@@ -9,17 +9,21 @@ package in the browser. The application has no JavaScript runtime dependency.
 
 ```sh
 make
-export DEEPSEEK_API_KEY='your-key'
+# Store your API key in ~/.guc/creds/deepseek-api-key first.
 ./build/gucode -C /path/to/project
 ./build/gucode -C /path/to/project -p 'Find and fix the failing test'
 ```
 
-Use `--key-file /path/to/private-key` instead of an environment variable if desired.
+Gucode checks `$HOME/.guc/creds/deepseek-api-key` first, then `--key-file`,
+then `DEEPSEEK_API_KEY`. Missing default files fall back; unreadable or invalid
+default files report an error. If `HOME` is unset or empty, default lookup is
+skipped. Trailing CR/LF is trimmed; empty, multiline, NUL-containing or oversized
+keys are rejected.
 `--model` defaults to `deepseek-flash`; `--endpoint` defaults to DeepSeek's Chat
 Completions endpoint. Only DeepSeek has been targeted for acceptance; other
 providers are not claimed compatible.
 
-File edits and shell commands ask for permission. `--yes` explicitly permits them
+File edits and shell commands ask for permission. `--yes` (or `--yolo`) explicitly permits them
 without prompts, including for noninteractive tasks. **Shell commands are not
 sandboxed:** they execute with your account's permissions. File tools resolve paths
 inside the selected working directory. API credentials loaded from the environment
@@ -43,7 +47,7 @@ subset dependency:
 
 ```sh
 gucman install groundupcoder:gucode
-gucode --key-file /home/user/deepseek.key
+gucode
 ```
 
 Create/upload your private API key file first. The package supports platform

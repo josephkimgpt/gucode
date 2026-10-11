@@ -5,7 +5,7 @@
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
-#define GUCODE_VERSION "0.1.0"
+#define GUCODE_VERSION "0.1.1"
 #define GC_LIMIT (8u * 1024u * 1024u)
 typedef struct {
   char *data;
