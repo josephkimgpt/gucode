@@ -22,6 +22,74 @@ char *gc_copy(const char *s) {
   memcpy(p, s, n);
   return p;
 }
+/* Preserve Unicode scalar values; replace malformed bytes with U+FFFD.
+ * Validate after collecting output, so pipe chunk boundaries do not split UTF-8.
+ */
+char *utf8_clean(const char *text) {
+  const unsigned char *p = (const unsigned char *)text;
+  size_t remaining = strlen(text);
+  Buffer b = {0};
+  while (remaining) {
+    size_t n = 0;
+    if (p[0] < 0x80)
+      n = 1;
+    else if (p[0] >= 0xc2 && p[0] <= 0xdf)
+      n = 2;
+    else if (p[0] >= 0xe0 && p[0] <= 0xef)
+      n = 3;
+    else if (p[0] >= 0xf0 && p[0] <= 0xf4)
+      n = 4;
+    int valid = n && n <= remaining;
+    for (size_t i = 1; valid && i < n; i++)
+      if (p[i] < 0x80 || p[i] > 0xbf)
+        valid = 0;
+    if (valid && n >= 3 &&
+        ((p[0] == 0xe0 && p[1] < 0xa0) ||
+         (p[0] == 0xed && p[1] >= 0xa0) ||
+         (p[0] == 0xf0 && p[1] < 0x90) ||
+         (p[0] == 0xf4 && p[1] >= 0x90)))
+      valid = 0;
+    if (valid)
+      buf_add(&b, (const char *)p, n);
+    else {
+      buf_text(&b, "\xef\xbf\xbd");
+      n = 1;
+    }
+    p += n;
+    remaining -= n;
+  }
+  return b.data ? b.data : gc_copy("");
+}
+int json_clean_strings(cJSON *j) {
+  int changed = 0;
+  for (; j; j = j->next) {
+    if (cJSON_IsString(j) && j->valuestring) {
+      char *clean = utf8_clean(j->valuestring);
+      if (strcmp(clean, j->valuestring)) {
+        if (!(j->type & cJSON_IsReference))
+          free(j->valuestring);
+        j->type &= ~cJSON_IsReference;
+        j->valuestring = clean;
+        changed = 1;
+      } else
+        free(clean);
+    }
+    if (j->string) {
+      char *clean = utf8_clean(j->string);
+      if (strcmp(clean, j->string)) {
+        if (!(j->type & cJSON_StringIsConst))
+          free(j->string);
+        j->type &= ~cJSON_StringIsConst;
+        j->string = clean;
+        changed = 1;
+      } else
+        free(clean);
+    }
+    if (j->child)
+      changed |= json_clean_strings(j->child);
+  }
+  return changed;
+}
 void buf_add(Buffer *b, const char *s, size_t n) {
   if (n > GC_LIMIT || b->len > GC_LIMIT - n) {
     fputs("gucode: data exceeds 8 MiB limit\n", stderr);
@@ -135,7 +203,9 @@ const char *json_string(const cJSON *j, const char *key) {
 cJSON *message(const char *role, const char *content) {
   cJSON *m = cJSON_CreateObject();
   cJSON_AddStringToObject(m, "role", role);
-  cJSON_AddStringToObject(m, "content", content);
+  char *clean = utf8_clean(content);
+  cJSON_AddStringToObject(m, "content", clean);
+  free(clean);
   return m;
 }
 

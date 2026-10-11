@@ -21,7 +21,9 @@ static double seconds(void) {
 static cJSON *result(int ok, const char *text) {
   cJSON *j = cJSON_CreateObject();
   cJSON_AddBoolToObject(j, "ok", ok);
-  cJSON_AddStringToObject(j, "output", text);
+  char *clean = utf8_clean(text);
+  cJSON_AddStringToObject(j, "output", clean);
+  free(clean);
   return j;
 }
 static cJSON *error_result(const char *msg) { return result(0, msg); }
@@ -75,7 +77,7 @@ static int approve(const char *name, const char *arguments, int yes) {
   if (yes)
     return 1;
   if (!isatty(STDIN_FILENO)) {
-    fputs("Denied: noninteractive execution requires --yes for edits and "
+    fputs("Denied: noninteractive execution requires --yes or --yolo for edits and "
           "commands.\n",
           stderr);
     return 0;

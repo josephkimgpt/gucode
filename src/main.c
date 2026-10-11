@@ -117,8 +117,11 @@ static int task(cJSON *messages, const char *prompt, const char *endpoint,
       if (txt) {
         size_t n = strlen(txt);
         char preview[1001];
-        memcpy(preview, txt, n > 1000 ? 1000 : n);
-        preview[n > 1000 ? 1000 : n] = 0;
+        size_t shown = n > 1000 ? 1000 : n;
+        while (shown && ((unsigned char)txt[shown] & 0xc0) == 0x80)
+          shown--;
+        memcpy(preview, txt, shown);
+        preview[shown] = 0;
         terminal_text(preview);
         if (n > 1000)
           fputs("\n[display truncated; full result sent to model]", stdout);
@@ -276,6 +279,8 @@ int main(int argc, char **argv) {
     if (text)
       messages = json_parse(text);
     free(text);
+    if (json_clean_strings(messages))
+      fputs("gucode: repaired invalid UTF-8 in saved conversation\n", stderr);
     if (!cJSON_IsArray(messages)) {
       fputs("gucode: invalid session file\n", stderr);
       free(key);

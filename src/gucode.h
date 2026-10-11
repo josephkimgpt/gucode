@@ -15,6 +15,8 @@ extern volatile sig_atomic_t interrupted;
 extern int use_color;
 void *gc_alloc(size_t n);
 char *gc_copy(const char *s);
+char *utf8_clean(const char *text);
+int json_clean_strings(cJSON *j);
 void buf_add(Buffer *b, const char *s, size_t n);
 void buf_text(Buffer *b, const char *s);
 void buf_free(Buffer *b);

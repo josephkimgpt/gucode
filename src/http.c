@@ -146,6 +146,7 @@ cJSON *api_turn(cJSON *messages, const char *endpoint, const char *model,
   cJSON_AddItemToObject(request, "thinking", thinking);
   cJSON_AddItemToObject(request, "messages", cJSON_Duplicate(messages, 1));
   cJSON_AddItemToObject(request, "tools", tool_definitions());
+  json_clean_strings(request);
   char *body = cJSON_PrintUnformatted(request);
   cJSON_Delete(request);
   if (!body) {

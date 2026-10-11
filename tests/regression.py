@@ -10,7 +10,7 @@ class Server(http.server.ThreadingHTTPServer):
 class Handler(http.server.BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def do_POST(self):
-  body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+  body=json.loads(self.rfile.read(int(self.headers['Content-Length'])).decode('utf-8'))
   mode=self.path[1:]
   self.server.last_request=body
   self.server.last_authorization=self.headers.get("Authorization")
@@ -27,6 +27,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
    event({'choices':[{'delta':{'content':'Verified ✓'},'finish_reason':None}]})
    event({'choices':[{'delta':{},'finish_reason':'stop'}]});self.wfile.write(b'data: [DONE]\n\n');return
   tools={
+   'binary':('shell',{'command':'cat binary.dat'}),
+   'read_binary':('read_file',{'path':'binary.dat'}),
    'edit':('edit_file',{'path':'a.txt','old_text':'old','new_text':'new'}),
    'duplicate':('edit_file',{'path':'a.txt','old_text':'old','new_text':'new'}),
    'deny':('write_file',{'path':'denied.txt','content':'must not appear'}),
@@ -121,6 +123,30 @@ try:
    assert 'Allow this action?' not in r.stdout
    if mode=='edit':assert (p/'a.txt').read_text()=='new'
   passed.append('yolo-edits-and-shell-without-prompts')
+ with tempfile.TemporaryDirectory(prefix='gucode-utf8-') as td:
+  p=pathlib.Path(td)
+  cases=[b'\x00asm\xff\xfe\x80tail',b'\xc0\xaf\xe0\x80\x80\xed\xa0\x80\xf4\x90\x80\x80\xf5\x80\x80\x80',
+         ('Hello 한글 ✓ 😀').encode(),b'x'*999+'😀'.encode(),b'x'*999+b'\xfftail',b'x'*4095+'😀'.encode()+b'end',b'x'*65535+'😀'.encode()]
+  for data in cases:
+   (p/'binary.dat').write_bytes(data);server.last_tool=None
+   r=subprocess.run([binary,'--yolo','--endpoint',f'http://127.0.0.1:{server.server_port}/binary','--session','saved.json','-p','test'],cwd=p,env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},capture_output=True,text=True,timeout=10)
+   assert r.returncode==0,(r.stdout,r.stderr)
+   expected=data[:65536].replace(b'\x00',b'?').decode('utf-8',errors='replace')
+   # Replacement grouping can differ, but all valid text and suffixes survive.
+   output=server.last_tool['output'];output.encode('utf-8')
+   if b'\xed' not in data:assert output==expected+('\n[output truncated at 65536 bytes]' if len(data)>65536 else '')
+   assert 'tail' not in expected or output.endswith('tail')
+   json.loads((p/'saved.json').read_text(encoding='utf-8'))
+   (p/'saved.json').unlink()
+  (p/'binary.dat').write_bytes(b'before\xffafter')
+  r=subprocess.run([binary,'--yolo','--endpoint',f'http://127.0.0.1:{server.server_port}/read_binary','-p','test'],cwd=p,env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},capture_output=True,text=True,timeout=10)
+  assert r.returncode==0 and server.last_tool['output']=='before�after'
+  (p/'saved.json').write_bytes(b'[{"role":"user","content":"old"},{"role":"assistant","content":"binary \xed\xa0\x80 \xff tail","bad\xffkey":"value"}]')
+  r=subprocess.run([binary,'--yolo','--endpoint',f'http://127.0.0.1:{server.server_port}/env','--session','saved.json','-p','continue'],cwd=p,env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},capture_output=True,text=True,timeout=10)
+  assert r.returncode==0 and 'repaired invalid UTF-8' in r.stderr,(r.stdout,r.stderr)
+  saved=json.loads((p/'saved.json').read_text(encoding='utf-8'))
+  assert saved[1]['content'].endswith('tail') and '�' in saved[1]['content']
+  passed.append('binary-output-unicode-boundaries-and-session-repair')
  for endpoint in ['http://localhost:80@attacker.example/','http://127.0.0.1:123bad/path','http://localhost:999999/','file:///tmp/key']:
    r=subprocess.run([binary,'--endpoint',endpoint,'-p','x'],env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},capture_output=True,timeout=5)
    assert r.returncode==2

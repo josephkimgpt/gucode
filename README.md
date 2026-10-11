@@ -34,6 +34,10 @@ are removed before launching commands, but this is not a security sandbox.
 ./build/gucode --yes --max-turns 16 -p 'Implement the requested change and test it'
 ```
 
+Binary or malformed UTF-8 in tool output is converted to valid text before
+sending it to the API. Invalid bytes become `�`; valid Unicode is preserved.
+Affected saved conversations from older releases are repaired when resumed.
+
 Sessions are opt-in, stored with mode 0600, and may contain source code and command
 output. The session path is relative to the working directory after `-C`. The key
 file path is resolved before `-C`. Keep sessions out of Git. Interactive commands:
