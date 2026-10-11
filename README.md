@@ -36,5 +36,19 @@ file path is resolved before `-C`. Keep sessions out of Git. Interactive command
 `/help`, `/clear`, `/exit`. Ctrl-C cancels a request or command and exits. ANSI color
 is used only on a terminal and can be disabled with `--no-color` or `NO_COLOR`.
 
+## gucOS
+
+The public gucOS package catalog provides the same C application and its libcurl
+subset dependency:
+
+```sh
+gucman install groundupcoder:gucode
+gucode --key-file /home/user/deepseek.key
+```
+
+Create/upload your private API key file first. The package supports platform
+1.0.1 or compatible later 1.x versions. For the library alone, install
+`groundupcoder:libcurl`; its README defines the supported curl API.
+
 See [architecture and limits](docs/design.md), [transport subset](docs/transport.md)
 and [testing](docs/testing.md). MIT licensed; vendored cJSON retains its own license.
