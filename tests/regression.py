@@ -21,6 +21,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
    b=('data: '+json.dumps(obj,ensure_ascii=False)+'\r\n\r\n').encode()
    # Every byte split independently, including UTF-8 and JSON string escapes.
    for off in range(0,len(b),3):self.wfile.write(b[off:off+3]);self.wfile.flush()
+  if mode=='id_collision':
+   calls=[{'index':i,'id':f'bad{i}','type':'function','function':{'name':'write_file','arguments':json.dumps({'path':'broken.txt','content':'never'})}} for i in range(2)]
+   payload=('data: '+json.dumps({'choices':[{'delta':{'tool_calls':calls},'finish_reason':'tool_calls'}]})+'\n\ndata: [DONE]\n\n').encode().replace(b'bad0',b'\xff').replace(b'bad1',b'\xfe')
+   self.wfile.write(payload);return
   last=body['messages'][-1]
   if last['role']=='tool':
    self.server.last_tool=json.loads(last['content'])
@@ -61,7 +65,7 @@ passed=[]
 try:
  with tempfile.TemporaryDirectory(prefix='gucode-regression-') as td:
   parent=pathlib.Path(td);os.environ['HOME']=str(parent/'home');(parent/'home').mkdir();(parent/'outside.txt').write_text('outside-secret');p=parent/'workspace';p.mkdir()
-  for mode in ['edit','duplicate','deny','outside','timeout','output','env','broken','missing_done','after_done','trailing_json','nul','key','session','flood','raw_nul','escape_error','agents_symlink','agents_hardlink','rate']:
+  for mode in ['edit','duplicate','deny','outside','timeout','output','env','broken','missing_done','after_done','trailing_json','nul','key','session','flood','raw_nul','escape_error','agents_symlink','agents_hardlink','rate','id_collision']:
    (p/'a.txt').write_text('old old' if mode=='duplicate' else 'old');server.last_tool=None
    args=[binary,'--endpoint',f'http://127.0.0.1:{server.server_port}/{mode}','--no-color','--command-timeout','1','-p','test']
    if mode!='deny':args.insert(1,'--yes')
@@ -74,7 +78,7 @@ try:
     else:os.link(p/'secret',p/'AGENTS.md')
     args[1:1]=['--key-file','secret']
    start=time.monotonic();r=subprocess.run(args,cwd=p,env={**os.environ,'DEEPSEEK_API_KEY':'test-only'},capture_output=True,text=True,timeout=15)
-   if mode in ['broken','missing_done','after_done','trailing_json','nul','raw_nul','escape_error','rate']:
+   if mode in ['broken','missing_done','after_done','trailing_json','nul','raw_nul','escape_error','rate','id_collision']:
     assert r.returncode!=0,(mode,r.stdout,r.stderr);assert not (p/'broken.txt').exists();assert server.last_tool is None
    else:
     assert r.returncode==0,(mode,r.stdout,r.stderr);tool=server.last_tool;assert tool is not None,mode

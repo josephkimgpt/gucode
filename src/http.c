@@ -281,6 +281,20 @@ cJSON *api_turn(cJSON *messages, const char *endpoint, const char *model,
     answer = NULL;
     snprintf(error, cap, "Response text exceeds 8 MiB after UTF-8 repair");
   }
+  if (answer) {
+    /* Repair can map distinct malformed IDs to the same string. Validate the
+     * actual IDs that will enter history before allowing any tool execution. */
+    cJSON *calls = cJSON_GetObjectItemCaseSensitive(answer, "tool_calls");
+    for (int i = 0; i < cJSON_GetArraySize(calls); i++)
+      for (int k = 0; k < i; k++)
+        if (!strcmp(json_string(cJSON_GetArrayItem(calls, i), "id"),
+                    json_string(cJSON_GetArrayItem(calls, k), "id"))) {
+          cJSON_Delete(answer);
+          answer = NULL;
+          snprintf(error, cap, "Duplicate tool call ID after UTF-8 repair");
+          goto cleanup;
+        }
+  }
 cleanup:
   curl_easy_cleanup(c);
   curl_slist_free_all(headers);
