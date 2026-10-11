@@ -32,16 +32,28 @@ static void help(void) {
       "Interactive commands: /help, /clear, /exit. Shell actions are not "
       "sandboxed.");
 }
-static void save(cJSON *messages, const char *path) {
+static int history_fits(cJSON *messages) {
+  char *text = json_print_limited(messages, GC_HISTORY_LIMIT);
+  int fits = text != NULL;
+  free(text);
+  return fits;
+}
+static int history_full(void) {
+  fputs("gucode: conversation reached the 7 MiB limit; use /clear or a new "
+        "session. No earlier messages were removed.\n", stderr);
+  return 1;
+}
+static int save(cJSON *messages, const char *path) {
   if (!path)
-    return;
-  char *text = cJSON_Print(messages);
+    return 0;
+  char *text = json_print_limited(messages, GC_LIMIT);
   if (!text || atomic_write(path, text, strlen(text), 1)) {
     fputs("gucode: cannot save session\n", stderr);
     free(text);
-    exit(1);
+    return 1;
   }
   free(text);
+  return 0;
 }
 static cJSON *initial(void) {
   cJSON *m = cJSON_CreateArray();
@@ -78,8 +90,17 @@ static cJSON *initial(void) {
 static int task(cJSON *messages, const char *prompt, const char *endpoint,
                 const char *model, const char *key, const char *session,
                 int yes, long max_turns, long timeout) {
-  cJSON_AddItemToArray(messages, message("user", prompt));
-  save(messages, session);
+  int before = cJSON_GetArraySize(messages);
+  cJSON *user = message("user", prompt);
+  if (!user)
+    return history_full();
+  cJSON_AddItemToArray(messages, user);
+  if (!history_fits(messages)) {
+    cJSON_DeleteItemFromArray(messages, before);
+    return history_full();
+  }
+  if (save(messages, session))
+    return 1;
   for (long turn = 0; turn < max_turns && !interrupted; turn++) {
     char err[512] = {0};
     if (use_color)
@@ -94,25 +115,52 @@ static int task(cJSON *messages, const char *prompt, const char *endpoint,
       fputc('\n', stderr);
       return interrupted ? 130 : 1;
     }
+    before = cJSON_GetArraySize(messages);
     cJSON_AddItemToArray(messages, answer);
     cJSON *calls = cJSON_GetObjectItemCaseSensitive(answer, "tool_calls");
-    if (!cJSON_GetArraySize(calls)) {
-      save(messages, session);
-      return 0;
-    }
+    /* Reserve a reply for every call before executing any side effects. Even
+     * when a result fills the budget, the saved protocol remains resumable. */
     cJSON *call;
     cJSON_ArrayForEach(call, calls) {
+      cJSON *reply = message("tool", "{\"ok\":false,\"output\":\"Not executed: "
+                             "conversation limit or interruption\"}");
+      cJSON_AddStringToObject(reply, "tool_call_id", json_string(call, "id"));
+      cJSON_AddItemToArray(messages, reply);
+    }
+    if (!history_fits(messages)) {
+      while (cJSON_GetArraySize(messages) > before)
+        cJSON_DeleteItemFromArray(messages, before);
+      return history_full();
+    }
+    if (!cJSON_GetArraySize(calls))
+      return save(messages, session);
+    int index = before + 1, full = 0;
+    cJSON_ArrayForEach(call, calls) {
+      if (interrupted || full)
+        break;
       cJSON *fn = cJSON_GetObjectItemCaseSensitive(call, "function");
       const char *name = json_string(fn, "name"),
                  *args = json_string(fn, "arguments");
-      cJSON *out = interrupted
-                       ? cJSON_Parse("{\"ok\":false,\"output\":\"Interrupted "
-                                     "before execution\"}")
-                       : run_tool(name, args, yes, timeout);
+      cJSON *out = run_tool(name, args, yes, timeout);
       char *encoded = cJSON_PrintUnformatted(out);
       cJSON *reply = message("tool", encoded ? encoded : "{\"ok\":false}");
       cJSON_AddStringToObject(reply, "tool_call_id", json_string(call, "id"));
-      cJSON_AddItemToArray(messages, reply);
+      cJSON *reserved = cJSON_DetachItemFromArray(messages, index);
+      cJSON_InsertItemInArray(messages, index, reply);
+      if (!history_fits(messages)) {
+        cJSON_DeleteItemFromArray(messages, index);
+        /* Preserve success/failure without retaining the oversized output.
+         * This is shorter than the reserved reply, so it always fits. */
+        cJSON_ReplaceItemInObjectCaseSensitive(
+            reserved, "content", cJSON_CreateString(
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(out, "ok"))
+                    ? "{\"ok\":true,\"output_omitted\":true}"
+                    : "{\"ok\":false,\"output_omitted\":true}"));
+        cJSON_InsertItemInArray(messages, index, reserved);
+        full = 1;
+      } else
+        cJSON_Delete(reserved);
+      index++;
       const char *txt = json_string(out, "output");
       if (txt) {
         size_t n = strlen(txt);
@@ -123,14 +171,19 @@ static int task(cJSON *messages, const char *prompt, const char *endpoint,
         memcpy(preview, txt, shown);
         preview[shown] = 0;
         terminal_text(preview);
-        if (n > 1000)
+        if (full)
+          fputs("\n[result omitted from history: conversation limit]", stdout);
+        else if (n > 1000)
           fputs("\n[display truncated; full result sent to model]", stdout);
         fputc('\n', stdout);
       }
       free(encoded);
       cJSON_Delete(out);
     }
-    save(messages, session);
+    if (save(messages, session))
+      return 1;
+    if (full)
+      return history_full();
   }
   fprintf(
       stderr, "gucode: %s\n",
@@ -140,6 +193,7 @@ static int task(cJSON *messages, const char *prompt, const char *endpoint,
   return interrupted ? 130 : 1;
 }
 int main(int argc, char **argv) {
+  atexit(clear_protected_files);
   cJSON_Hooks hooks = {gc_alloc, free};
   cJSON_InitHooks(&hooks);
   const char *prompt = NULL, *directory = NULL, *session = NULL,
@@ -279,13 +333,21 @@ int main(int argc, char **argv) {
     if (text)
       messages = json_parse(text);
     free(text);
-    if (json_clean_strings(messages))
+    int cleaned = json_clean_strings(messages);
+    if (cleaned > 0)
       fputs("gucode: repaired invalid UTF-8 in saved conversation\n", stderr);
     if (!cJSON_IsArray(messages)) {
       fputs("gucode: invalid session file\n", stderr);
       free(key);
       cJSON_Delete(messages);
+      curl_global_cleanup();
       return 1;
+    }
+    if (cleaned < 0 || !history_fits(messages)) {
+      cJSON_Delete(messages);
+      free(key);
+      curl_global_cleanup();
+      return history_full();
     }
   }
   if (!messages)
@@ -301,10 +363,19 @@ int main(int argc, char **argv) {
       fputs("\ngucode> ", stdout);
       fflush(stdout);
       Buffer input = {0};
-      int ch;
+      int ch, oversized = 0;
       while ((ch = fgetc(stdin)) != EOF && ch != '\n' && !interrupted) {
         char c = (char)ch;
-        buf_add(&input, &c, 1);
+        if (input.len < GC_LIMIT)
+          buf_add(&input, &c, 1);
+        else
+          oversized = 1;
+      }
+      if (oversized) {
+        buf_free(&input);
+        fputs("gucode: input exceeds 8 MiB; prompt discarded\n", stderr);
+        rc = 1;
+        continue;
       }
       free(line);
       line = input.data ? input.data : gc_copy("");
@@ -324,7 +395,9 @@ int main(int argc, char **argv) {
       if (!strcmp(line, "/clear")) {
         cJSON_Delete(messages);
         messages = initial();
-        save(messages, session);
+        rc = save(messages, session);
+        if (rc)
+          break;
         puts("Conversation cleared.");
         continue;
       }

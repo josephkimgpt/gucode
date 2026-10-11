@@ -11,6 +11,7 @@ typedef struct {
   Buffer line, event, text, raw;
   ToolCall calls[CALLS];
   int count, done, failed;
+  size_t received;
   char finish[64];
   char error[256];
 } Stream;
@@ -105,7 +106,12 @@ static void line(Stream *s) {
 }
 static size_t receive(char *data, size_t size, size_t count, void *arg) {
   Stream *s = arg;
+  if (size && count > (GC_LIMIT - s->received) / size) {
+    problem(s, "Response exceeds 8 MiB limit; no tools executed");
+    return 0;
+  }
   size_t n = size * count;
+  s->received += n;
   if (memchr(data, 0, n)) {
     problem(s, "NUL byte in event stream");
     return 0;
@@ -144,13 +150,19 @@ cJSON *api_turn(cJSON *messages, const char *endpoint, const char *model,
   cJSON *thinking = cJSON_CreateObject();
   cJSON_AddStringToObject(thinking, "type", "disabled");
   cJSON_AddItemToObject(request, "thinking", thinking);
-  cJSON_AddItemToObject(request, "messages", cJSON_Duplicate(messages, 1));
+  /* The synchronous request borrows history; deleting the envelope must not
+   * delete it or require a second full conversation tree. */
+  cJSON_AddItemReferenceToObject(request, "messages", messages);
   cJSON_AddItemToObject(request, "tools", tool_definitions());
-  json_clean_strings(request);
-  char *body = cJSON_PrintUnformatted(request);
+  if (json_clean_strings(request) < 0) {
+    cJSON_Delete(request);
+    snprintf(error, cap, "Text exceeds 8 MiB after UTF-8 repair");
+    return NULL;
+  }
+  char *body = json_print_limited(request, GC_LIMIT);
   cJSON_Delete(request);
   if (!body) {
-    snprintf(error, cap, "Cannot serialize request");
+    snprintf(error, cap, "Request exceeds 8 MiB limit; use /clear or a new session");
     return NULL;
   }
   Stream s = {0};
@@ -227,6 +239,10 @@ cJSON *api_turn(cJSON *messages, const char *endpoint, const char *model,
     goto cleanup;
   }
   answer = message("assistant", s.text.data ? s.text.data : "");
+  if (!answer) {
+    snprintf(error, cap, "Response text exceeds 8 MiB after UTF-8 repair");
+    goto cleanup;
+  }
   if (s.count) {
     cJSON *calls = cJSON_CreateArray();
     cJSON_AddItemToObject(answer, "tool_calls", calls);
@@ -257,6 +273,13 @@ cJSON *api_turn(cJSON *messages, const char *endpoint, const char *model,
       cJSON_AddStringToObject(fn, "arguments", t->args.data);
       cJSON_AddItemToArray(calls, call);
     }
+  }
+  /* Normalize provider strings before history accounting, including tool IDs
+   * and encoded arguments. Later request preparation must not grow history. */
+  if (json_clean_strings(answer) < 0) {
+    cJSON_Delete(answer);
+    answer = NULL;
+    snprintf(error, cap, "Response text exceeds 8 MiB after UTF-8 repair");
   }
 cleanup:
   curl_easy_cleanup(c);

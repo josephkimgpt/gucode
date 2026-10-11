@@ -7,6 +7,9 @@
 #include <stdio.h>
 #define GUCODE_VERSION "0.1.1"
 #define GC_LIMIT (8u * 1024u * 1024u)
+/* Leave room for the request envelope and tool schemas. Serialized byte limits,
+ * not a total process-memory or provider-token limit. */
+#define GC_HISTORY_LIMIT (7u * 1024u * 1024u)
 typedef struct {
   char *data;
   size_t len, cap;
@@ -27,8 +30,10 @@ void terminal_text(const char *s);
 void terminal_write(FILE *out, const char *s);
 const char *json_string(const cJSON *j, const char *key);
 cJSON *json_parse(const char *text);
+char *json_print_limited(const cJSON *j, size_t limit);
 int valid_endpoint(const char *url);
 void protect_file(const char *path);
+void clear_protected_files(void);
 int file_protected(const char *path);
 cJSON *message(const char *role, const char *content);
 cJSON *tool_definitions(void);

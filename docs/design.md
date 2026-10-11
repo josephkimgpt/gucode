@@ -25,9 +25,40 @@ output cannot starve timeout checks. Tool results are displayed with control
 characters escaped to prevent ANSI command injection. Application color is emitted
 separately. Terminal wrapping and basic input editing are supplied by the terminal.
 
-Requests have a five-minute total deadline. Input/session buffers are capped at
-8 MiB; JSON allocation failure exits before executing a partially built tool batch.
-Text file reads are limited to 256 KiB. There is no automatic context compaction,
+Resource limits are local byte/count limits, not provider token budgets:
+
+| Resource | Limit |
+| --- | --- |
+| Retained conversation | 7 MiB of compact serialized JSON |
+| Outbound request | 8 MiB of JSON, including tools and settings |
+| Inbound response | 8 MiB of total SSE body, including framing/comments |
+| Interactive input line / session file read | 8 MiB |
+| File read or edit input | 256 KiB of text, no NUL bytes |
+| Shell output / directory listing | 64 KiB before UTF-8 repair and truncation notices |
+| Tool calls per response | 16 |
+| API calls per task | 24 by default; `--max-turns` accepts 1–3600 |
+| Shell deadline | 120 seconds by default; `--command-timeout` accepts 1–3600 |
+| API connection / total deadline | 30 / 300 seconds |
+| Requested model output | 8192 tokens per response |
+| Root `AGENTS.md` read | 32 KiB |
+
+The conversation budget leaves room for the request envelope. A full conversation
+stops the task with an error; earlier messages are not silently deleted. Use
+`/clear` or start a new session. Assistant calls and reserved tool replies must fit
+before any calls execute. If a tool's result would exceed the budget after it runs,
+the saved reply retains `ok` and sets `output_omitted`; remaining calls are marked
+unexecuted, and the task stops. File changes already made are not rolled back.
+Sessions are written as compact JSON, within the loader's limit. Older sessions
+above the conversation budget are rejected without rewriting them. Oversized input
+lines are discarded; oversized responses abort without executing their calls.
+
+These are not an 8 MiB process-memory ceiling: JSON nodes, strings, serialization
+buffers, temporary results, libc, and curl add overhead. Request serialization
+borrows the conversation tree instead of duplicating it. Buffers and the JSON
+printer have bounded growth; out-of-memory allocation still exits. The provider's
+context limit may be reached before the local byte limit.
+
+There is no automatic context compaction,
 background task manager, subagents, multimodal input, MCP, OAuth/subscription login,
 or full-screen editor in this version. Use an API key and start a new conversation
 or `/clear` when needed. Sessions are opt-in JSON files with mode 0600.

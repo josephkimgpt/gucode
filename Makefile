@@ -21,6 +21,10 @@ build/gucode-sanitize: $(SOURCES) src/gucode.h
 	$(CC) $(CPPFLAGS) -g -O1 -std=c11 -Wall -Wextra -fsanitize=address,undefined $(SOURCES) $(LDFLAGS) $(LDLIBS) -o $@
 check: build/gucode
 	python3 tests/regression.py
+	python3 tests/resources.py
 sanitize: build/gucode-sanitize
 	GUCODE_BINARY=$(CURDIR)/build/gucode-sanitize python3 tests/regression.py
-.PHONY: check sanitize
+	GUCODE_BINARY=$(CURDIR)/build/gucode-sanitize python3 tests/resources.py
+check-leaks: build/gucode
+	GUCODE_LEAK_CHECK=1 python3 tests/resources.py
+.PHONY: check sanitize check-leaks

@@ -22,6 +22,10 @@ static cJSON *result(int ok, const char *text) {
   cJSON *j = cJSON_CreateObject();
   cJSON_AddBoolToObject(j, "ok", ok);
   char *clean = utf8_clean(text);
+  if (!clean) {
+    cJSON_Delete(j);
+    return result(0, "Tool output exceeds 8 MiB after UTF-8 repair");
+  }
   cJSON_AddStringToObject(j, "output", clean);
   free(clean);
   return j;

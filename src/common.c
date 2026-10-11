@@ -49,6 +49,10 @@ char *utf8_clean(const char *text) {
          (p[0] == 0xf0 && p[1] < 0x90) ||
          (p[0] == 0xf4 && p[1] >= 0x90)))
       valid = 0;
+    if (b.len > GC_LIMIT - (valid ? n : 3)) {
+      buf_free(&b);
+      return NULL;
+    }
     if (valid)
       buf_add(&b, (const char *)p, n);
     else {
@@ -65,6 +69,8 @@ int json_clean_strings(cJSON *j) {
   for (; j; j = j->next) {
     if (cJSON_IsString(j) && j->valuestring) {
       char *clean = utf8_clean(j->valuestring);
+      if (!clean)
+        return -1;
       if (strcmp(clean, j->valuestring)) {
         if (!(j->type & cJSON_IsReference))
           free(j->valuestring);
@@ -76,6 +82,8 @@ int json_clean_strings(cJSON *j) {
     }
     if (j->string) {
       char *clean = utf8_clean(j->string);
+      if (!clean)
+        return -1;
       if (strcmp(clean, j->string)) {
         if (!(j->type & cJSON_StringIsConst))
           free(j->string);
@@ -85,8 +93,12 @@ int json_clean_strings(cJSON *j) {
       } else
         free(clean);
     }
-    if (j->child)
-      changed |= json_clean_strings(j->child);
+    if (j->child) {
+      int rc = json_clean_strings(j->child);
+      if (rc < 0)
+        return -1;
+      changed |= rc;
+    }
   }
   return changed;
 }
@@ -99,6 +111,8 @@ void buf_add(Buffer *b, const char *s, size_t n) {
     size_t cap = b->cap ? b->cap : 256;
     while (cap < b->len + n + 1)
       cap *= 2;
+    if (cap > GC_LIMIT + 1)
+      cap = GC_LIMIT + 1;
     char *p = realloc(b->data, cap);
     if (!p) {
       fputs("gucode: out of memory\n", stderr);
@@ -204,6 +218,10 @@ cJSON *message(const char *role, const char *content) {
   cJSON *m = cJSON_CreateObject();
   cJSON_AddStringToObject(m, "role", role);
   char *clean = utf8_clean(content);
+  if (!clean) {
+    cJSON_Delete(m);
+    return NULL;
+  }
   cJSON_AddStringToObject(m, "content", clean);
   free(clean);
   return m;
@@ -224,11 +242,30 @@ cJSON *json_parse(const char *text) {
     }
   return cJSON_ParseWithOpts(text, NULL, 1);
 }
+char *json_print_limited(const cJSON *j, size_t limit) {
+  if (limit > GC_LIMIT)
+    return NULL;
+  /* cJSON requires five spare bytes for preallocated printing. */
+  size_t capacity = limit + 6 < 256 ? limit + 6 : 256;
+  for (;;) {
+    char *text = gc_alloc(capacity);
+    if (cJSON_PrintPreallocated((cJSON *)j, text, (int)capacity, 0)) {
+      if (strlen(text) <= limit)
+        return text;
+      free(text);
+      return NULL;
+    }
+    free(text);
+    if (capacity == limit + 6)
+      return NULL;
+    capacity = capacity > (limit + 6) / 2 ? limit + 6 : capacity * 2;
+  }
+}
 int valid_endpoint(const char *url) {
   int https = !strncmp(url, "https://", 8);
-  const char *p = url + (https ? 8 : 7);
   if (!https && strncmp(url, "http://", 7))
     return 0;
+  const char *p = url + (https ? 8 : 7);
   if (strpbrk(url, "@#\\"))
     return 0;
   for (const unsigned char *q = (const unsigned char *)url; *q; q++)
@@ -263,6 +300,13 @@ int valid_endpoint(const char *url) {
 static char *protected_paths[2];
 static struct stat protected_stats[2];
 static int protected_exists[2], protected_count;
+void clear_protected_files(void) {
+  for (int i = 0; i < protected_count; i++) {
+    free(protected_paths[i]);
+    protected_paths[i] = NULL;
+  }
+  protected_count = 0;
+}
 void protect_file(const char *path) {
   if (!path || protected_count >= 2)
     return;

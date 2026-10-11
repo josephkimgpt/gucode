@@ -5,6 +5,8 @@ Run builds and test suites under the shared machine-job scheduler when installed
 ```sh
 machine-job run --kind build --timeout 300 -- make
 machine-job run --kind build --timeout 300 -- python3 tests/regression.py
+machine-job run --kind build --timeout 300 -- make check sanitize
+machine-job run --kind build --timeout 300 -- make check-leaks  # macOS
 machine-job run --kind build --timeout 600 -- python3 tests/live.py
 ```
 
@@ -18,6 +20,18 @@ reports contain task outcomes and tool names, never keys or conversation bodies.
 The deterministic suite covers malformed/truncated responses, split SSE/UTF-8,
 permission denial, workspace confinement, edit match cardinality, command timeout,
 output bounds, and removal of the API-key environment variable from child tools.
+
+`make check` also runs `tests/resources.py`: repeated tool requests and `/clear`,
+aggregate response limits, oversized history/input and UTF-8 expansion, bounded
+tool replies, session resume, and persistence errors. All use a loopback mock
+server, a disposable HOME, and synthetic credentials; they incur no API charges.
+`make sanitize` runs both suites under AddressSanitizer and UndefinedBehaviorSanitizer.
+`make check-leaks` additionally runs macOS `leaks --atExit` for a 40-task tool
+conversation and session error paths, requiring explicit zero-leak reports.
+The leak checker reports its own exit status, so target error exit codes are also
+checked without the wrapper. This is sampled leak evidence, not proof that every
+possible execution is leak-free; retained history and allocator high-water marks
+must also be distinguished from unreachable allocations.
 
 The gucOS package repository owns browser build, source install, retained archive
 relinking, binary install, reload and live API acceptance. It takes an explicit
